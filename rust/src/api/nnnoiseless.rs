@@ -174,6 +174,11 @@ fn denoise_wav(
         }
     }
 
+    // Report final progress of 1.0 to indicate completion
+    if let Some(sink) = &sink {
+        let _ = sink.add(1.0);
+    }
+
     let mut output_samples_interleaved = vec![0.0f32; cleaned_channels[0].len() * num_channels];
     for i in 0..cleaned_channels[0].len() {
         for ch in 0..num_channels {
