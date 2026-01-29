@@ -155,7 +155,8 @@ fn denoise_wav(
     for frame_start in (0..num_samples_per_channel).step_by(FRAME_SIZE) {
         // Report progress if a sink is provided.
         if let Some(sink) = &sink {
-            let progress = frame_start as f32 / num_samples_per_channel as f32;
+            let progress = (frame_start + FRAME_SIZE).min(num_samples_per_channel) as f32
+                / num_samples_per_channel as f32;
             let _ = sink.add(progress);
         }
 
@@ -193,6 +194,11 @@ fn denoise_wav(
         writer.write_sample(clipped_sample as i16)?;
     }
     writer.finalize()?;
+
+    // Ensure 1.0 progress is sent at the end.
+    if let Some(sink) = sink {
+        let _ = sink.add(1.0);
+    }
 
     Ok(())
 }
