@@ -34,3 +34,11 @@ Future<void> denoise({
   inputPathStr: inputPathStr,
   outputPathStr: outputPathStr,
 );
+
+Stream<double> denoiseWithProgress({
+  required String inputPathStr,
+  required String outputPathStr,
+}) => RustLib.instance.api.crateApiNnnoiselessDenoiseWithProgress(
+  inputPathStr: inputPathStr,
+  outputPathStr: outputPathStr,
+);

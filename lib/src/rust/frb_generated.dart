@@ -3,8 +3,6 @@
 
 // ignore_for_file: unused_import, unused_element, unnecessary_import, duplicate_ignore, invalid_use_of_internal_member, annotate_overrides, non_constant_identifier_names, curly_braces_in_flow_control_structures, prefer_const_literals_to_create_immutables, unused_field
 
-import 'dart:io';
-
 import 'api/nnnoiseless.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -66,14 +64,11 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.11.1';
 
   @override
-  int get rustContentHash => 832027299;
+  int get rustContentHash => -981448726;
 
-  static final kDefaultExternalLibraryLoaderConfig =
+  static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-        stem:
-            Platform.isAndroid
-                ? 'rust_lib_flutter_nnnoiseless'
-                : 'flutter_nnnoiseless',
+        stem: 'rust_lib_flutter_nnnoiseless',
         ioDirectory: 'rust/target/release/',
         webPrefix: 'pkg/',
       );
@@ -88,6 +83,11 @@ abstract class RustLibApi extends BaseApi {
   Future<Uint8List> crateApiNnnoiselessDenoiseChunk({
     required List<int> input,
     required int inputSampleRate,
+  });
+
+  Stream<double> crateApiNnnoiselessDenoiseWithProgress({
+    required String inputPathStr,
+    required String outputPathStr,
   });
 }
 
@@ -168,6 +168,46 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         argNames: ["input", "inputSampleRate"],
       );
 
+  @override
+  Stream<double> crateApiNnnoiselessDenoiseWithProgress({
+    required String inputPathStr,
+    required String outputPathStr,
+  }) {
+    final sink = RustStreamSink<double>();
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_String(inputPathStr, serializer);
+            sse_encode_String(outputPathStr, serializer);
+            sse_encode_StreamSink_f_32_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 3,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: sse_decode_AnyhowException,
+          ),
+          constMeta: kCrateApiNnnoiselessDenoiseWithProgressConstMeta,
+          argValues: [inputPathStr, outputPathStr, sink],
+          apiImpl: this,
+        ),
+      ),
+    );
+    return sink.stream;
+  }
+
+  TaskConstMeta get kCrateApiNnnoiselessDenoiseWithProgressConstMeta =>
+      const TaskConstMeta(
+        debugName: "denoise_with_progress",
+        argNames: ["inputPathStr", "outputPathStr", "sink"],
+      );
+
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
@@ -175,9 +215,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RustStreamSink<double> dco_decode_StreamSink_f_32_Sse(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    throw UnimplementedError();
+  }
+
+  @protected
   String dco_decode_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as String;
+  }
+
+  @protected
+  double dco_decode_f_32(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw as double;
   }
 
   @protected
@@ -218,10 +270,24 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RustStreamSink<double> sse_decode_StreamSink_f_32_Sse(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    throw UnimplementedError('Unreachable ()');
+  }
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     var inner = sse_decode_list_prim_u_8_strict(deserializer);
     return utf8.decoder.convert(inner);
+  }
+
+  @protected
+  double sse_decode_f_32(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return deserializer.buffer.getFloat32();
   }
 
   @protected
@@ -277,9 +343,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_StreamSink_f_32_Sse(
+    RustStreamSink<double> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(
+      self.setupAndSerialize(
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_f_32,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+      ),
+      serializer,
+    );
+  }
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_list_prim_u_8_strict(utf8.encoder.convert(self), serializer);
+  }
+
+  @protected
+  void sse_encode_f_32(double self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    serializer.buffer.putFloat32(self);
   }
 
   @protected

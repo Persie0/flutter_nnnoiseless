@@ -1,3 +1,5 @@
+import 'dart:isolate';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart';
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
@@ -16,9 +18,14 @@ abstract class Noiseless {
   /// This function reads an audio file from [inputPathStr], processes it,
   /// and saves the cleaned audio to [outputPathStr]. It handles different
   /// audio formats and sample rates automatically.
+  ///
+  /// [onProgress] is an optional callback that receives the progress (0.0 to 1.0).
+  /// [useIsolate] if true, runs the denoising in a separate Dart Isolate.
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
+    Function(double)? onProgress,
+    bool useIsolate = false,
   });
 
   /// Denoises a single chunk of raw audio data.
@@ -59,9 +66,69 @@ class _NoiselessImpl extends Noiseless {
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
+    Function(double)? onProgress,
+    bool useIsolate = false,
   }) async {
     if (!_initialized) await init();
-    return denoise(inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+
+    if (useIsolate) {
+      if (onProgress != null) {
+        await _denoiseInIsolateWithProgress(
+            inputPathStr, outputPathStr, onProgress);
+      } else {
+        await _denoiseInIsolate(inputPathStr, outputPathStr);
+      }
+    } else {
+      if (onProgress != null) {
+        final stream = denoiseWithProgress(
+            inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+        await for (final progress in stream) {
+          onProgress(progress);
+        }
+      } else {
+        return denoise(
+            inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+      }
+    }
+  }
+
+  Future<void> _denoiseInIsolate(String input, String output) async {
+    await Isolate.run(() async {
+      await RustLib.init();
+      await denoise(inputPathStr: input, outputPathStr: output);
+    });
+  }
+
+  Future<void> _denoiseInIsolateWithProgress(
+      String input, String output, Function(double) onProgress) async {
+    final p = ReceivePort();
+    await Isolate.spawn((SendPort sendPort) async {
+      try {
+        await RustLib.init();
+        final stream = denoiseWithProgress(
+            inputPathStr: input, outputPathStr: output);
+        await for (final prog in stream) {
+          sendPort.send(prog);
+        }
+        sendPort.send("DONE");
+      } catch (e) {
+        sendPort.send(["ERROR", e.toString()]);
+      }
+    }, p.sendPort);
+
+    await for (final message in p) {
+      if (message == "DONE") {
+        p.close();
+        break;
+      } else if (message is List &&
+          message.length == 2 &&
+          message[0] == "ERROR") {
+        p.close();
+        throw Exception(message[1]);
+      } else if (message is double) {
+        onProgress(message);
+      }
+    }
   }
 
   @override

@@ -22,7 +22,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
+  RustStreamSink<double> dco_decode_StreamSink_f_32_Sse(dynamic raw);
+
+  @protected
   String dco_decode_String(dynamic raw);
+
+  @protected
+  double dco_decode_f_32(dynamic raw);
 
   @protected
   List<int> dco_decode_list_prim_u_8_loose(dynamic raw);
@@ -43,7 +49,15 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AnyhowException sse_decode_AnyhowException(SseDeserializer deserializer);
 
   @protected
+  RustStreamSink<double> sse_decode_StreamSink_f_32_Sse(
+    SseDeserializer deserializer,
+  );
+
+  @protected
   String sse_decode_String(SseDeserializer deserializer);
+
+  @protected
+  double sse_decode_f_32(SseDeserializer deserializer);
 
   @protected
   List<int> sse_decode_list_prim_u_8_loose(SseDeserializer deserializer);
@@ -73,7 +87,16 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   );
 
   @protected
+  void sse_encode_StreamSink_f_32_Sse(
+    RustStreamSink<double> self,
+    SseSerializer serializer,
+  );
+
+  @protected
   void sse_encode_String(String self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_f_32(double self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_prim_u_8_loose(List<int> self, SseSerializer serializer);
