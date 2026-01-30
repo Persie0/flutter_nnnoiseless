@@ -1,7 +1,37 @@
+import 'dart:isolate';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart';
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
 import 'package:wav/wav_file.dart';
+
+/// Message type for isolate communication
+class _IsolateMessage {
+  final String inputPath;
+  final String outputPath;
+  final SendPort sendPort;
+
+  _IsolateMessage({
+    required this.inputPath,
+    required this.outputPath,
+    required this.sendPort,
+  });
+}
+
+/// Top-level function for isolate execution with progress reporting
+Future<void> _denoiseIsolateEntrypoint(_IsolateMessage message) async {
+  try {
+    await RustLib.init();
+    final stream = denoiseWithProgress(
+        inputPathStr: message.inputPath, outputPathStr: message.outputPath);
+    await for (final prog in stream) {
+      message.sendPort.send(prog);
+    }
+    message.sendPort.send("DONE");
+  } catch (e) {
+    message.sendPort.send(["ERROR", e.toString()]);
+  }
+}
 
 /// A Dart interface for the nnnoiseless Rust library.
 ///
@@ -16,9 +46,14 @@ abstract class Noiseless {
   /// This function reads an audio file from [inputPathStr], processes it,
   /// and saves the cleaned audio to [outputPathStr]. It handles different
   /// audio formats and sample rates automatically.
+  ///
+  /// [onProgress] is an optional callback that receives the progress (0.0 to 1.0).
+  /// [useIsolate] if true, runs the denoising in a separate Dart Isolate.
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
+    Function(double)? onProgress,
+    bool useIsolate = false,
   });
 
   /// Denoises a single chunk of raw audio data.
@@ -43,6 +78,29 @@ abstract class Noiseless {
   });
 }
 
+class _DenoiseWorkerArgs {
+  final SendPort sendPort;
+  final String inputPath;
+  final String outputPath;
+
+  _DenoiseWorkerArgs(this.sendPort, this.inputPath, this.outputPath);
+}
+
+@pragma('vm:entry-point')
+void _denoiseWorker(_DenoiseWorkerArgs args) async {
+  try {
+    await RustLib.init();
+    final stream = denoiseWithProgress(
+        inputPathStr: args.inputPath, outputPathStr: args.outputPath);
+    await for (final prog in stream) {
+      args.sendPort.send(prog);
+    }
+    args.sendPort.send("DONE");
+  } catch (e) {
+    args.sendPort.send(["ERROR", e.toString()]);
+  }
+}
+
 /// The concrete implementation of the [Noiseless] interface.
 class _NoiselessImpl extends Noiseless {
   bool _initialized = false;
@@ -59,9 +117,62 @@ class _NoiselessImpl extends Noiseless {
   Future<void> denoiseFile({
     required String inputPathStr,
     required String outputPathStr,
+    Function(double)? onProgress,
+    bool useIsolate = false,
   }) async {
     if (!_initialized) await init();
-    return denoise(inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+
+    if (useIsolate) {
+      if (onProgress != null) {
+        await _denoiseInIsolateWithProgress(
+            inputPathStr, outputPathStr, onProgress);
+      } else {
+        await _denoiseInIsolate(inputPathStr, outputPathStr);
+      }
+    } else {
+      if (onProgress != null) {
+        final stream = denoiseWithProgress(
+            inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+        await for (final progress in stream) {
+          onProgress(progress);
+        }
+      } else {
+        return denoise(
+            inputPathStr: inputPathStr, outputPathStr: outputPathStr);
+      }
+    }
+  }
+
+  Future<void> _denoiseInIsolate(String input, String output) async {
+    await Isolate.run(() async {
+      await RustLib.init();
+      await denoise(inputPathStr: input, outputPathStr: output);
+    });
+  }
+
+  Future<void> _denoiseInIsolateWithProgress(
+      String input, String output, Function(double) onProgress) async {
+    final p = ReceivePort();
+    final message = _IsolateMessage(
+      inputPath: input,
+      outputPath: output,
+      sendPort: p.sendPort,
+    );
+    await Isolate.spawn(_denoiseIsolateEntrypoint, message);
+
+    await for (final message in p) {
+      if (message == "DONE") {
+        p.close();
+        break;
+      } else if (message is List &&
+          message.length == 2 &&
+          message[0] == "ERROR") {
+        p.close();
+        throw Exception(message[1]);
+      } else if (message is double) {
+        onProgress(message);
+      }
+    }
   }
 
   @override

@@ -1,3 +1,4 @@
+use crate::frb_generated::StreamSink;
 use anyhow::{Context, Result};
 use dasp::interpolate::sinc::Sinc;
 use dasp::ring_buffer::Fixed;
@@ -5,9 +6,9 @@ use dasp::{signal, Signal};
 use hound::{WavReader, WavSpec, WavWriter};
 use nnnoiseless::{DenoiseState, RnnModel};
 use once_cell::sync::Lazy;
+use std::f32::consts::PI;
 use std::path::Path;
 use std::sync::Mutex;
-use std::f32::consts::PI;
 
 /// The fixed frame size required by the nnnoiseless model.
 const FRAME_SIZE: usize = DenoiseState::FRAME_SIZE;
@@ -102,8 +103,12 @@ pub fn denoise_chunk(input: Vec<u8>, input_sample_rate: u32) -> Result<Vec<u8>> 
     Ok(output_bytes)
 }
 
-// The existing file-based denoising function (unchanged).
-fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
+// The existing file-based denoising function.
+fn denoise_wav(
+    input_path: &Path,
+    output_path: &Path,
+    sink: Option<StreamSink<f32>>,
+) -> Result<()> {
     let mut reader = WavReader::open(input_path)
         .with_context(|| format!("Failed to open input file: {:?}", input_path))?;
     let spec = reader.spec();
@@ -148,6 +153,13 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
         vec![Vec::with_capacity(num_samples_per_channel); num_channels];
 
     for frame_start in (0..num_samples_per_channel).step_by(FRAME_SIZE) {
+        // Report progress if a sink is provided.
+        if let Some(sink) = &sink {
+            let progress = (frame_start + FRAME_SIZE).min(num_samples_per_channel) as f32
+                / num_samples_per_channel as f32;
+            let _ = sink.add(progress);
+        }
+
         for ch in 0..num_channels {
             let frame_end = (frame_start + FRAME_SIZE).min(num_samples_per_channel);
             let input_slice = &resampled_channels[ch][frame_start..frame_end];
@@ -161,6 +173,11 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
             let output_len = frame_end - frame_start;
             cleaned_channels[ch].extend_from_slice(&output_frame[..output_len]);
         }
+    }
+
+    // Report final progress of 1.0 to indicate completion
+    if let Some(sink) = &sink {
+        let _ = sink.add(1.0);
     }
 
     let mut output_samples_interleaved = vec![0.0f32; cleaned_channels[0].len() * num_channels];
@@ -183,6 +200,11 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
     }
     writer.finalize()?;
 
+    // Ensure 1.0 progress is sent at the end.
+    if let Some(sink) = sink {
+        let _ = sink.add(1.0);
+    }
+
     Ok(())
 }
 
@@ -191,5 +213,15 @@ fn denoise_wav(input_path: &Path, output_path: &Path) -> Result<()> {
 pub fn denoise(input_path_str: &String, output_path_str: &String) -> Result<()> {
     let input_path = Path::new(input_path_str);
     let output_path = Path::new(output_path_str);
-    denoise_wav(input_path, output_path)
+    denoise_wav(input_path, output_path, None)
+}
+
+pub fn denoise_with_progress(
+    input_path_str: String,
+    output_path_str: String,
+    sink: StreamSink<f32>,
+) -> Result<()> {
+    let input_path = Path::new(&input_path_str);
+    let output_path = Path::new(&output_path_str);
+    denoise_wav(input_path, output_path, Some(sink))
 }
