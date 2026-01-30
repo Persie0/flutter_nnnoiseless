@@ -78,6 +78,29 @@ abstract class Noiseless {
   });
 }
 
+class _DenoiseWorkerArgs {
+  final SendPort sendPort;
+  final String inputPath;
+  final String outputPath;
+
+  _DenoiseWorkerArgs(this.sendPort, this.inputPath, this.outputPath);
+}
+
+@pragma('vm:entry-point')
+void _denoiseWorker(_DenoiseWorkerArgs args) async {
+  try {
+    await RustLib.init();
+    final stream = denoiseWithProgress(
+        inputPathStr: args.inputPath, outputPathStr: args.outputPath);
+    await for (final prog in stream) {
+      args.sendPort.send(prog);
+    }
+    args.sendPort.send("DONE");
+  } catch (e) {
+    args.sendPort.send(["ERROR", e.toString()]);
+  }
+}
+
 /// The concrete implementation of the [Noiseless] interface.
 class _NoiselessImpl extends Noiseless {
   bool _initialized = false;
