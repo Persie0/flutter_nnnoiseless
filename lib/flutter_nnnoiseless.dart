@@ -5,6 +5,34 @@ import 'package:flutter_nnnoiseless/src/rust/api/nnnoiseless.dart';
 import 'package:flutter_nnnoiseless/src/rust/frb_generated.dart';
 import 'package:wav/wav_file.dart';
 
+/// Message type for isolate communication
+class _IsolateMessage {
+  final String inputPath;
+  final String outputPath;
+  final SendPort sendPort;
+
+  _IsolateMessage({
+    required this.inputPath,
+    required this.outputPath,
+    required this.sendPort,
+  });
+}
+
+/// Top-level function for isolate execution with progress reporting
+Future<void> _denoiseIsolateEntrypoint(_IsolateMessage message) async {
+  try {
+    await RustLib.init();
+    final stream = denoiseWithProgress(
+        inputPathStr: message.inputPath, outputPathStr: message.outputPath);
+    await for (final prog in stream) {
+      message.sendPort.send(prog);
+    }
+    message.sendPort.send("DONE");
+  } catch (e) {
+    message.sendPort.send(["ERROR", e.toString()]);
+  }
+}
+
 /// A Dart interface for the nnnoiseless Rust library.
 ///
 /// Provides high-level methods for denoising audio files and real-time
@@ -125,8 +153,12 @@ class _NoiselessImpl extends Noiseless {
   Future<void> _denoiseInIsolateWithProgress(
       String input, String output, Function(double) onProgress) async {
     final p = ReceivePort();
-    await Isolate.spawn(
-        _denoiseWorker, _DenoiseWorkerArgs(p.sendPort, input, output));
+    final message = _IsolateMessage(
+      inputPath: input,
+      outputPath: output,
+      sendPort: p.sendPort,
+    );
+    await Isolate.spawn(_denoiseIsolateEntrypoint, message);
 
     await for (final message in p) {
       if (message == "DONE") {
